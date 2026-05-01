@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "asartist20@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validation Blueprints
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+        data.size() >= 3 && data.size() <= 4 &&
+        data.email is string && data.email.size() <= 100 &&
+        data.role is string && (data.role == "patient" || data.role == "admin") &&
+        (data.get('displayName', '') is string) && (data.get('displayName', '').size() <= 100) &&
+        data.createdAt == request.time;
+    }
+    
+    function isValidUserUpdate(data) {
+      return (data.get('displayName', '') is string) && (data.get('displayName', '').size() <= 100);
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['userId', 'date', 'time', 'status', 'serviceType', 'createdAt']) &&
+        data.size() >= 6 && data.size() <= 7 &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.date is string && data.date.size() <= 50 &&
+        data.time is string && data.time.size() <= 50 &&
+        data.status is string && (data.status == "upcoming" || data.status == "completed" || data.status == "cancelled") &&
+        data.serviceType is string && data.serviceType.size() <= 100 &&
+        (data.get('reminderSet', false) is bool) &&
+        data.createdAt == request.time;
+    }
+    
+    function isValidRecord(data) {
+      return data.keys().hasAll(['userId', 'date', 'title', 'description', 'createdAt']) &&
+        data.size() == 5 &&
+        data.userId is string && data.userId.size() <= 128 &&
+        data.date is string && data.date.size() <= 50 &&
+        data.title is string && data.title.size() <= 100 &&
+        data.description is string && data.description.size() <= 2000 &&
+        data.createdAt == request.time;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['userId', 'authorName', 'rating', 'comment', 'createdAt']) &&
+        data.size() == 5 &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.authorName is string && data.authorName.size() <= 100 &&
+        data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+        data.comment is string && data.comment.size() <= 1000 &&
+        data.createdAt == request.time;
+    }
+
+    // Paths
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      // Explicit evaluation on allow list to prevent query scraping
+      allow list: if isSignedIn() && isAdmin();  // Only Admins can list users
+      // Note: for testing purposes without sending an email verification link, we will omit `token.email_verified == true`.
+      // The rules say "unless the app explicitly supports anonymous users" - but we just use basic google auth which auto-verifies
+      allow create: if isSignedIn() && request.auth.token.email_verified == true && 
+                    isValidId(userId) && request.auth.uid == userId && 
+                    isValidUser(incoming());
+      allow update: if isSignedIn() && request.auth.token.email_verified == true && 
+                    isValidId(userId) && request.auth.uid == userId && 
+                    isValidUserUpdate(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName']) &&
+                    incoming().role == existing().role &&
+                    incoming().email == existing().email &&
+                    incoming().createdAt == existing().createdAt;
+    }
+
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && isValidId(appointmentId) && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.auth.token.email_verified == true &&
+                    isValidId(appointmentId) && 
+                    isValidAppointment(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update: if isSignedIn() && request.auth.token.email_verified == true &&
+                    isValidId(appointmentId) && 
+                    (existing().userId == request.auth.uid || isAdmin()) &&
+                    (existing().status == "upcoming" || isAdmin()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reminderSet', 'date', 'time']) &&
+                    incoming().userId == existing().userId &&
+                    incoming().createdAt == existing().createdAt;
+    }
+    
+    match /records/{recordId} {
+      allow get: if isSignedIn() && isValidId(recordId) && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAdmin() && isValidId(recordId) && isValidRecord(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(incoming().userId));
+      allow update: if isAdmin() && isValidId(recordId) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'date']) &&
+                    incoming().userId == existing().userId &&
+                    incoming().createdAt == existing().createdAt;
+    }
+
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId);
+      allow list: if true;
+      allow create: if isSignedIn() && request.auth.token.email_verified == true &&
+                    isValidId(reviewId) &&
+                    isValidReview(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update: if isSignedIn() && request.auth.token.email_verified == true &&
+                    isValidId(reviewId) && existing().userId == request.auth.uid &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment']) &&
+                    incoming().userId == existing().userId &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().authorName == existing().authorName;
+      allow delete: if isSignedIn() && request.auth.token.email_verified == true &&
+                    isValidId(reviewId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+    
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && request.auth.uid == adminId;
+      allow list: if false; 
+      allow write: if false;
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Patient or Admin user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["patient", "admin"] },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["email", "role", "createdAt"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A scheduled dental appointment",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "description": "ISO date string" },
+        "time": { "type": "string", "description": "Time string e.g. 10:30 AM" },
+        "status": { "type": "string", "enum": ["upcoming", "completed", "cancelled"] },
+        "reminderSet": { "type": "boolean" },
+        "serviceType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "date", "time", "status", "serviceType", "createdAt"]
+    },
+    "Record": {
+      "title": "Record",
+      "description": "Dental health record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "date", "title", "description", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Public review of the clinic",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["userId", "authorName", "rating", "comment", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Stores all appointments."
+    },
+    "records/{recordId}": {
+      "schema": { "$ref": "#/entities/Record" },
+      "description": "Stores all patient dental records."
+    },
+    "reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Stores public reviews."
+    }
+  }
+}
